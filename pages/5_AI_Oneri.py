@@ -2,7 +2,6 @@ import streamlit as st
 import json
 import os
 import time
-from dotenv import load_dotenv
 
 st.set_page_config(page_title="AI Sinif Onerisi - ClubSpace ITU", page_icon="🤖", layout="wide")
 
@@ -10,8 +9,11 @@ if "logged_in" not in st.session_state or not st.session_state.logged_in:
     st.warning("Bu sayfayi gormek icin giris yapmaniz gerekiyor.")
     st.stop()
 
-load_dotenv()
-api_key = os.getenv("GOOGLE_AI_KEY")
+# API key - Streamlit Cloud secrets veya .env'den al
+try:
+    api_key = st.secrets["GOOGLE_AI_KEY"]
+except Exception:
+    api_key = os.getenv("GOOGLE_AI_KEY", "")
 
 role_labels = {
     "club_admin": "Kulup Yoneticisi",
@@ -40,11 +42,9 @@ def akilli_oneri(katilimci, tercih_bina, ekipman_ihtiyac, etkinlik_turu):
     skorlar = []
     for c in classrooms:
         skor = 0
-
-        # 1. Kapasite skoru (max 35 puan)
         kapasite_fark = c["capacity"] - katilimci
         if kapasite_fark < 0:
-            continue  # Yetersiz kapasite, elendi
+            continue
         elif kapasite_fark == 0:
             skor += 35
         elif kapasite_fark <= 10:
@@ -60,10 +60,8 @@ def akilli_oneri(katilimci, tercih_bina, ekipman_ihtiyac, etkinlik_turu):
         else:
             skor += 3
 
-        # 2. Ekipman skoru (max 30 puan)
         ekipman_puan = 0
-        ekipman_toplam = len(ekipman_ihtiyac)
-        if ekipman_toplam > 0:
+        if len(ekipman_ihtiyac) > 0:
             if "Projektor" in ekipman_ihtiyac:
                 ekipman_puan += 12 if c["has_projector"] else -10
             if "Ses Sistemi" in ekipman_ihtiyac:
@@ -71,35 +69,23 @@ def akilli_oneri(katilimci, tercih_bina, ekipman_ihtiyac, etkinlik_turu):
             if "Beyaz Tahta" in ekipman_ihtiyac:
                 ekipman_puan += 6 if c["has_whiteboard"] else -4
         else:
-            # Ekipman istenmemis, var olan ekipman hafif bonus
             if c["has_projector"]: ekipman_puan += 4
             if c["has_sound_system"]: ekipman_puan += 3
             if c["has_whiteboard"]: ekipman_puan += 2
         skor += ekipman_puan
 
-        # 3. Bina tercihi skoru (max 20 puan)
         if tercih_bina != "Fark Etmez":
-            if c["building"] == tercih_bina:
-                skor += 20
-            else:
-                skor += 0
+            skor += 20 if c["building"] == tercih_bina else 0
         else:
-            skor += 10  # Fark etmez ise orta puan
+            skor += 10
 
-        # 4. Kat skoru (max 8 puan) - erisim kolayligi
-        if c["floor"] == 0:
-            skor += 8
-        elif c["floor"] == 1:
-            skor += 7
-        elif c["floor"] == 2:
-            skor += 5
-        elif c["floor"] == 3:
-            skor += 3
-        else:
-            skor += 1
+        if c["floor"] == 0: skor += 8
+        elif c["floor"] == 1: skor += 7
+        elif c["floor"] == 2: skor += 5
+        elif c["floor"] == 3: skor += 3
+        else: skor += 1
 
-        # 5. Etkinlik turune gore bonus (max 7 puan)
-        if etkinlik_turu in ["Konser / Gosteri"] and c["has_sound_system"]:
+        if etkinlik_turu == "Konser / Gosteri" and c["has_sound_system"]:
             skor += 7
         elif etkinlik_turu in ["Workshop / Egitim", "Konferans / Seminer"] and c["has_projector"]:
             skor += 5
@@ -135,10 +121,7 @@ def oneri_metni_olustur(skor, sinif, katilimci, ekipman_ihtiyac):
     if "Ses Sistemi" in ekipman_ihtiyac and not sinif["has_sound_system"]:
         eksik_ekipman.append("ses sistemi")
 
-    dezavantaj = ""
-    if eksik_ekipman:
-        dezavantaj = f"⚠️ **Dezavantaj:** {', '.join(eksik_ekipman)} bulunmuyor."
-
+    dezavantaj = f"⚠️ **Dezavantaj:** {', '.join(eksik_ekipman)} bulunmuyor." if eksik_ekipman else ""
     return kapasite_yorum, ekipman, dezavantaj
 
 col1, col2 = st.columns([1, 1])
@@ -146,14 +129,8 @@ col1, col2 = st.columns([1, 1])
 with col1:
     st.subheader("Etkinlik Bilgileri")
     etkinlik_turu = st.selectbox("Etkinlik Turu", [
-        "Workshop / Egitim",
-        "Konferans / Seminer",
-        "Toplanti",
-        "Konser / Gosteri",
-        "Spor Etkinligi",
-        "Sergi",
-        "Genel Kurul",
-        "Diger"
+        "Workshop / Egitim", "Konferans / Seminer", "Toplanti",
+        "Konser / Gosteri", "Spor Etkinligi", "Sergi", "Genel Kurul", "Diger"
     ])
     katilimci = st.number_input("Tahmini Katilimci Sayisi", min_value=1, value=50, step=10)
     tercih_bina = st.selectbox(
@@ -161,12 +138,11 @@ with col1:
         ["Fark Etmez"] + sorted(list(set(c["building"] for c in classrooms)))
     )
     ekipman_ihtiyac = st.multiselect("Gerekli Ekipman", ["Projektor", "Ses Sistemi", "Beyaz Tahta"])
-    ek_bilgi = st.text_area("Ek Bilgi (opsiyonel)", placeholder="Ornek: Sahne gerekiyor, karanlik ortam lazim...")
+    ek_bilgi = st.text_area("Ek Bilgi (opsiyonel)", placeholder="Ornek: Sahne gerekiyor...")
 
     if st.button("🤖 AI'dan Oneri Al", type="primary", use_container_width=True):
         with st.spinner("Siniflar analiz ediliyor..."):
             time.sleep(1.5)
-
             ai_basarili = False
             if api_key:
                 try:
