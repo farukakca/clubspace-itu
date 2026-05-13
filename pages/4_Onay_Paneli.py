@@ -11,23 +11,26 @@ if st.session_state.user_role not in ["advisor", "coordinator", "building_mgr"]:
     st.error("Bu sayfaya sadece Danisman, Koordinator ve Bina Sorumlusu erisebilir.")
     st.stop()
 
-with open("data/reservations.json", "r", encoding="utf-8") as f:
-    reservations = json.load(f)
 with open("data/classrooms.json", "r", encoding="utf-8") as f:
     classrooms = json.load(f)
 
-role_labels = {
-    "club_admin": "Kulup Yoneticisi",
-    "advisor": "Danisman",
-    "coordinator": "Koordinator",
-    "building_mgr": "Bina Sorumlusu",
-    "student": "Ogrenci"
-}
+# Session'da rezervasyon listesi yoksa JSON'dan yukle
+if "reservations" not in st.session_state:
+    with open("data/reservations.json", "r", encoding="utf-8") as f:
+        st.session_state.reservations = json.load(f)
+
+role_labels = {"club_admin": "Kulup Yoneticisi", "advisor": "Danisman", "coordinator": "Koordinator", "building_mgr": "Bina Sorumlusu", "student": "Ogrenci"}
 
 role_filter = {
     "advisor": "pending",
     "coordinator": "advisor_approved",
     "building_mgr": "coord_approved"
+}
+
+role_next_status = {
+    "advisor": "advisor_approved",
+    "coordinator": "coord_approved",
+    "building_mgr": "approved"
 }
 
 with st.sidebar:
@@ -47,7 +50,9 @@ st.info("📌 Onay Sureci: **Kulup** → **Danisman** → **Koordinator** → **
 st.divider()
 
 beklenen_status = role_filter.get(st.session_state.user_role, "pending")
-gorunecek = reservations if show_all else [r for r in reservations if r["status"] == beklenen_status]
+sonraki_status = role_next_status.get(st.session_state.user_role, "approved")
+
+gorunecek = st.session_state.reservations if show_all else [r for r in st.session_state.reservations if r["status"] == beklenen_status]
 
 if not gorunecek:
     st.success("✅ Onay bekleyen talep yok!")
@@ -72,12 +77,24 @@ else:
                 st.markdown(f"**Sinif:** {sinif_str} &nbsp;|&nbsp; **Tarih:** {r['event_date']} &nbsp;|&nbsp; **Saat:** {r['start_time']} - {r['end_time']}")
                 st.markdown(f"**Katilimci:** {r['expected_attendees']} kisi &nbsp;|&nbsp; **Durum:** `{r['status']}`")
             with col2:
-                st.markdown("**Karar Ver:**")
-                yorum = st.text_input("Yorum", key=f"yorum_{r['id']}", placeholder="Opsiyonel not...")
-                col_a, col_r = st.columns(2)
-                with col_a:
-                    if st.button("✅ Onayla", key=f"onayla_{r['id']}", use_container_width=True, type="primary"):
-                        st.success(f"'{r['event_title']}' onaylandi!")
-                with col_r:
-                    if st.button("❌ Reddet", key=f"reddet_{r['id']}", use_container_width=True):
-                        st.error(f"'{r['event_title']}' reddedildi.")
+                if r["status"] in [beklenen_status] or show_all:
+                    st.markdown("**Karar Ver:**")
+                    yorum = st.text_input("Yorum", key=f"yorum_{r['id']}", placeholder="Opsiyonel not...")
+                    col_a, col_r = st.columns(2)
+                    with col_a:
+                        if st.button("✅ Onayla", key=f"onayla_{r['id']}", use_container_width=True, type="primary"):
+                            # Session state'teki rezervasyonu guncelle
+                            for i, res in enumerate(st.session_state.reservations):
+                                if res["id"] == r["id"]:
+                                    st.session_state.reservations[i]["status"] = sonraki_status
+                                    break
+                            st.success(f"✅ '{r['event_title']}' onaylandi!")
+                            st.rerun()
+                    with col_r:
+                        if st.button("❌ Reddet", key=f"reddet_{r['id']}", use_container_width=True):
+                            for i, res in enumerate(st.session_state.reservations):
+                                if res["id"] == r["id"]:
+                                    st.session_state.reservations[i]["status"] = "rejected"
+                                    break
+                            st.error(f"❌ '{r['event_title']}' reddedildi.")
+                            st.rerun()
